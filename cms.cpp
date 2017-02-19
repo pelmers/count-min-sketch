@@ -10,35 +10,20 @@
 
 #define W (1 << 22)
 #define D (8)
+#define BUF_SIZE 2048
+
+unsigned int string_hash(const std::string& s) {
+    unsigned long hash = 5381;
+    int c;
+    int i = 0;
+    while ((c = s[i++]))
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+
+    return hash;
+}
 
 int main(int argc, char *argv[])
 {
-
-    std::ifstream data("dump");
-    std::string line;
-    while (true) {
-        if (!std::getline(data, line)) {
-            break;
-        } else {
-            int year = std::stoi(line.substr(0, 4));
-            int month = std::stoi(line.substr(5, 2));
-            std::string word;
-            std::cout << year << month;
-            std::istringstream stream(line);
-            bool first = true;
-            while (std::getline(stream, word, ' ')) {
-                // First word is the date itself.
-                if (first) {
-                    first = false;
-                    continue;
-                }
-                std::cout << word;
-                // TODO: hash the word and put it away.
-            }
-        }
-    }
-
-    cl::Buffer d_a, d_b, d_c;   // Matrices in device memory
 
 //--------------------------------------------------------------------------------
 // Create a context and queue
@@ -72,33 +57,81 @@ int main(int argc, char *argv[])
         cl::Context context(chosen_device);
         cl::CommandQueue queue(context, device);
 
-//--------------------------------------------------------------------------------
-// Setup the buffers, initialize matrices, and write them into global memory
-//--------------------------------------------------------------------------------
-
-        //  Reset A, B and C matrices (just to play it safe)
-        //d_a = cl::Buffer(context, h_A.begin(), h_A.end(), true);
-
-        //d_b = cl::Buffer(context, h_B.begin(), h_B.end(), true);
-
-        //d_c = cl::Buffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * size);
-
-//--------------------------------------------------------------------------------
-// OpenCL matrix multiplication ... Naive
-//--------------------------------------------------------------------------------
+        // Setup global shared buffers.
+        std::vector<uint32_t> h_counts(W*D, 0);
+        //std::vector<uint32_t> h_params = {
+        //    3005958, 995248, 636928, 2567793, 909030, 4151203, 1128352, 3152829,
+        //        2068697, 2587417, 2052571, 3764501, 1619340, 2920635, 868570, 3079234
+        //};
+        std::vector<uint32_t> h_params = {
+            1, 0, 636928, 2567793, 909030, 4151203, 1128352, 3152829,
+                2068697, 2587417, 2052571, 3764501, 1619340, 2920635, 868570, 3079234
+        };
+        cl::Buffer d_counts(context, h_counts.begin(), h_counts.end(), true);
+        cl::Buffer d_params(context, h_params.begin(), h_params.end(), true);
 
         // Create the compute program from the source buffer
         cl::Program program(context, util::loadProgram("cms.cl"), true);
 
         // Create the compute kernel from the program
-        cl::make_kernel<int, cl::Buffer, cl::Buffer, cl::Buffer> cms(program, "cms");
+        cl::make_kernel<cl::Buffer, cl::Buffer, cl::Buffer> cms(program, "cms");
 
-        // cl::NDRange global(N, N);
-        // naive_mmul(cl::EnqueueArgs(queue, global), N, d_a, d_b, d_c);
+        cl::NDRange global(BUF_SIZE);
 
-        queue.finish();
+        std::ifstream data("dump");
+        std::string line;
+        std::vector<uint32_t> h_hashes;
+        h_hashes.reserve(BUF_SIZE);
+        while (true) {
+            if (!std::getline(data, line)) {
+                break;
+            } else {
+                int year = std::stoi(line.substr(0, 4));
+                int month = std::stoi(line.substr(5, 2));
+                std::string word;
+                std::istringstream stream(line);
+                bool first = true;
+                while (std::getline(stream, word, ' ')) {
+                    // First word is the date itself.
+                    if (first) {
+                        first = false;
+                        continue;
+                    }
+                    // Multiply year by two to avoid colliding year-month pairs.
+                    unsigned int hash = string_hash(word) + year*2 + month;
+                    h_hashes.push_back(hash);
+                    if (h_hashes.size() == BUF_SIZE) {
+                        // Put it into cl buffer and send to gpu.
+                        cl::Buffer d_hashes(context, h_hashes.begin(), h_hashes.end(), true);
 
-        // cl::copy(queue, d_c, h_C.begin(), h_C.end());
+                        cms(cl::EnqueueArgs(queue, global), d_params, d_hashes, d_counts);
+
+                        queue.finish();
+                        h_hashes.clear();
+                    }
+                }
+            }
+        }
+
+        // Finish computing any leftover hashes.
+        if (h_hashes.size() > 0) {
+            cl::Buffer d_hashes(context, h_hashes.begin(), h_hashes.end(), true);
+
+            cms(cl::EnqueueArgs(queue, cl::NDRange(h_hashes.size())), d_params, d_hashes, d_counts);
+
+            queue.finish();
+            h_hashes.clear();
+        }
+
+        cl::copy(queue, d_counts, h_counts.begin(), h_counts.end());
+        for (int i = 0; i < 8; i++) {
+            std::string filename = "outcountsA";
+            filename[filename.size() - 1] += i;
+            std::ofstream out_counts(filename);
+            for (int k = 0; k < W; k++) {
+                out_counts << h_counts[k + i*W] << ' ';
+            }
+        }
 
     } catch (cl::Error err)
     {

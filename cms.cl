@@ -1,18 +1,20 @@
 __kernel void cms(
-   const int N,
-   __global float* A,
-   __global float* B,
-   __global float* C)
+   __constant unsigned int* params,
+   __global unsigned int* hashes,
+   __global unsigned int* counts)
 {
-   int k;
    int i = get_global_id(0);
-   int j = get_global_id(1);
-   float tmp;
-   if ( (i < N) && (j <N))
-   {
-       tmp = 0.0;
-       for(k=0;k<N;k++)
-           tmp += A[i*N+k] * B[k*N+j];
-       C[i*N+j] = tmp;
-   }
+// Do 8 hashes, increment corresponding positions in counts
+// See atomic_add(pointr, incr_value)
+// 2^22 - 1
+unsigned m = 4194303;
+int k;
+for (k = 0; k < 8; k++) {
+       unsigned int a = params[k*2];
+       unsigned int b = params[k*2+1];
+       unsigned int idx = (a*hashes[i] + b) % m;
+
+       atomic_add(counts + idx + (k << 22), 1);
+       }
+
 }
