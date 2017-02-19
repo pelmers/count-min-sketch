@@ -78,7 +78,12 @@ int main(int argc, char *argv[])
 
         cl::NDRange global(BUF_SIZE);
 
-        std::ifstream data("dump");
+        if (argc < 2) {
+            std::cerr << "First argument must be input filename." << std::endl;
+            return 1;
+        }
+        std::string input_filename(argv[1]);
+        std::ifstream data(input_filename);
         std::string line;
         std::vector<uint32_t> h_hashes;
         h_hashes.reserve(BUF_SIZE);
