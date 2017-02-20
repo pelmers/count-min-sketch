@@ -6,11 +6,15 @@
 #include "util.hpp"
 #include "err_code.h"
 #include "device_picker.hpp"
+#include <cstdio>
 #include <sstream>
+#include <thread>
+#include <queue>
 
 #define W (1 << 22)
 #define D (8)
-#define BUF_SIZE 2048
+#define BUF_SIZE 8000
+#define NUM_BUFFERS 12
 
 unsigned int string_hash(const std::string& s) {
     unsigned long hash = 5381;
@@ -28,7 +32,6 @@ int main(int argc, char *argv[])
 //--------------------------------------------------------------------------------
 // Create a context and queue
 //--------------------------------------------------------------------------------
-
     try
     {
 
@@ -76,8 +79,6 @@ int main(int argc, char *argv[])
         // Create the compute kernel from the program
         cl::make_kernel<cl::Buffer, cl::Buffer, cl::Buffer> cms(program, "cms");
 
-        cl::NDRange global(BUF_SIZE);
-
         if (argc < 2) {
             std::cerr << "First argument must be input filename." << std::endl;
             return 1;
@@ -85,12 +86,62 @@ int main(int argc, char *argv[])
         std::string input_filename(argv[1]);
         std::ifstream data(input_filename);
         std::string line;
-        std::vector<uint32_t> h_hashes;
-        h_hashes.reserve(BUF_SIZE);
-        while (true) {
+
+        std::queue<std::vector<uint32_t>*> buf_queue;
+        std::condition_variable buf_queue_full_cv;
+        std::condition_variable buf_queue_empty_cv;
+        std::mutex m;
+        std::atomic_bool finished(false);
+        int line_count = 0;
+
+        auto kernel_dispatch = std::thread([&]() {
+            while (!finished || buf_queue.size() > 0) {
+                std::vector<uint32_t>* buf;
+                std::unique_lock<std::mutex> lk(m);
+                buf_queue_empty_cv.wait(lk, [&] {return buf_queue.size() > 0;});
+
+                buf = buf_queue.front();
+                buf_queue.pop();
+                if (buf_queue.size() == NUM_BUFFERS - 1) {
+                    lk.unlock();
+                    buf_queue_full_cv.notify_one();
+                } else {
+                    lk.unlock();
+                }
+                cl::NDRange range(buf->size());
+
+                // Put it into cl buffer and send to gpu.
+                cl::Buffer d_hashes(context, buf->begin(), buf->end(), true);
+
+                cms(cl::EnqueueArgs(queue, range), d_params, d_hashes, d_counts);
+                delete buf;
+                queue.finish();
+            }
+        });
+
+        auto push_queue = [&](std::vector<uint32_t>* buf) {
+            std::unique_lock<std::mutex> lk(m);
+            buf_queue_full_cv.wait(lk, [&] {return buf_queue.size() < NUM_BUFFERS;});
+            buf_queue.push(buf);
+            if (buf_queue.size() == 1) {
+                lk.unlock();
+                buf_queue_empty_cv.notify_one();
+            }
+        };
+        std::vector<uint32_t> *h_hashes = new std::vector<uint32_t>();
+        h_hashes->reserve(BUF_SIZE);
+        while (!finished) {
             if (!std::getline(data, line)) {
+                if (h_hashes->size() > 0) {
+                    push_queue(h_hashes);
+                }
+                finished = true;
                 break;
             } else {
+                line_count++;
+                if (line_count % 1000 == 0) {
+                    std::printf("%d lines...\n", line_count);
+                }
                 int year = std::stoi(line.substr(0, 4));
                 int month = std::stoi(line.substr(5, 2));
                 std::string word;
@@ -104,38 +155,25 @@ int main(int argc, char *argv[])
                     }
                     // Multiply year by two to avoid colliding year-month pairs.
                     unsigned int hash = string_hash(word) + year*2 + month;
-                    h_hashes.push_back(hash);
-                    if (h_hashes.size() == BUF_SIZE) {
-                        // Put it into cl buffer and send to gpu.
-                        cl::Buffer d_hashes(context, h_hashes.begin(), h_hashes.end(), true);
-
-                        cms(cl::EnqueueArgs(queue, global), d_params, d_hashes, d_counts);
-
-                        queue.finish();
-                        h_hashes.clear();
+                    h_hashes->push_back(hash);
+                    if (h_hashes->size() == BUF_SIZE) {
+                        push_queue(h_hashes);
+                        h_hashes = new std::vector<uint32_t>();
+                        h_hashes->reserve(BUF_SIZE);
                     }
                 }
             }
         }
 
-        // Finish computing any leftover hashes.
-        if (h_hashes.size() > 0) {
-            cl::Buffer d_hashes(context, h_hashes.begin(), h_hashes.end(), true);
-
-            cms(cl::EnqueueArgs(queue, cl::NDRange(h_hashes.size())), d_params, d_hashes, d_counts);
-
-            queue.finish();
-            h_hashes.clear();
-        }
-
+        kernel_dispatch.join();
         cl::copy(queue, d_counts, h_counts.begin(), h_counts.end());
         for (int i = 0; i < 8; i++) {
-            std::string filename = "outcountsA";
-            filename[filename.size() - 1] += i;
-            std::ofstream out_counts(filename);
-            for (int k = 0; k < W; k++) {
-                out_counts << h_counts[k + i*W] << ' ';
-            }
+            //std::string filename = "outcountsA";
+            //filename[filename.size() - 1] += i;
+            //std::ofstream out_counts(filename);
+            //for (int k = 0; k < W; k++) {
+            //    out_counts << h_counts[k + i*W] << ' ';
+            //}
         }
 
     } catch (cl::Error err)

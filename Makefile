@@ -3,7 +3,7 @@ ifndef CPPC
 	CPPC=g++
 endif
 
-CCFLAGS= -std=c++11
+CCFLAGS= -std=c++11 -O2
 
 INC = -I lib
 
