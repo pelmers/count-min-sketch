@@ -17,6 +17,9 @@ ifeq ($(PLATFORM), Darwin)
 	CCFLAGS += -stdlib=libc++
 	LIBS = -framework OpenCL
 endif
+ifeq ($(PLATFORM), MINGW64_NT-10.0)
+	LIBS = "C:\Windows\System32\OpenCL.dll"
+endif
 
 cms: cms.cpp
 	$(CPPC) $^ $(INC) $(CCFLAGS) $(LIBS) -o $@
