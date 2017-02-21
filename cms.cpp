@@ -168,6 +168,9 @@ int main(int argc, char *argv[])
 
         for (int i = 0; i < 8; i++) {
             std::string filename = "counts_0";
+			if (argc >= 3) {
+				filename = argv[2];
+			}
             filename[filename.size() - 1] += i;
             std::ofstream out_counts(filename);
             for (int k = 0; k < W; k++) {

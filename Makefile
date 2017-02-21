@@ -21,9 +21,13 @@ ifeq ($(PLATFORM), MINGW64_NT-10.0)
 	LIBS = "C:\Windows\System32\OpenCL.dll"
 endif
 
+all: cms cms_bench
+
 cms: cms.cpp
 	$(CPPC) $^ $(INC) $(CCFLAGS) $(LIBS) -o $@
-
+cms_bench: cms_bench.cpp
+	$(CPPC) $^ $(INC) $(CCFLAGS) $(LIBS) -o $@
 
 clean:
 	rm -f cms
+	rm -f cms_bench
