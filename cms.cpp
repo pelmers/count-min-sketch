@@ -22,13 +22,11 @@ unsigned int string_hash(const std::string& s) {
     int i = 0;
     while ((c = s[i++]))
         hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
-
     return hash;
 }
 
 int main(int argc, char *argv[])
 {
-
 //--------------------------------------------------------------------------------
 // Create a context and queue
 //--------------------------------------------------------------------------------
@@ -139,7 +137,7 @@ int main(int argc, char *argv[])
                 break;
             } else {
                 line_count++;
-                if (line_count % 1000 == 0) {
+                if (line_count % 50000 == 0) {
                     std::printf("%d lines...\n", line_count);
                 }
                 int year = std::stoi(line.substr(0, 4));
@@ -153,8 +151,8 @@ int main(int argc, char *argv[])
                         first = false;
                         continue;
                     }
-                    // Multiply year by two to avoid colliding year-month pairs.
-                    unsigned int hash = string_hash(word) + year*2 + month;
+                    // Multiply year by twelve to avoid colliding year-month pairs.
+                    unsigned int hash = string_hash(word) + year*12 + month;
                     h_hashes->push_back(hash);
                     if (h_hashes->size() == BUF_SIZE) {
                         push_queue(h_hashes);
@@ -167,13 +165,14 @@ int main(int argc, char *argv[])
 
         kernel_dispatch.join();
         cl::copy(queue, d_counts, h_counts.begin(), h_counts.end());
+
         for (int i = 0; i < 8; i++) {
-            //std::string filename = "outcountsA";
-            //filename[filename.size() - 1] += i;
-            //std::ofstream out_counts(filename);
-            //for (int k = 0; k < W; k++) {
-            //    out_counts << h_counts[k + i*W] << ' ';
-            //}
+            std::string filename = "counts_0";
+            filename[filename.size() - 1] += i;
+            std::ofstream out_counts(filename);
+            for (int k = 0; k < W; k++) {
+                out_counts << h_counts[k + i*W] << ' ';
+            }
         }
 
     } catch (cl::Error err)
