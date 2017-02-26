@@ -28,7 +28,7 @@ def look_up_min(raw_int):
             min = estimate
     return min
 
-def create_graph(dates, values, begin_date, end_date):
+def create_graph(dates, values, begin_date, end_date, word):
     # Plot the data
 
     years = mdates.YearLocator()   # every year
@@ -49,6 +49,7 @@ def create_graph(dates, values, begin_date, end_date):
     ax.set_xlim(datemin, datemax)
 
     ax.format_xdata = mdates.DateFormatter('%Y-%m-%d')
+    plt.title(word)
     ax.grid(True)
 
     # rotates and right aligns the x labels, and moves the bottom of the
@@ -114,4 +115,4 @@ for year in range(begin_year, end_year + 1):
 print("Total: " + str(total_sum))
 
 create_graph(all_dates, all_values, datetime.datetime(begin_year, begin_month, 1),
-             datetime.datetime(end_year, end_month, 1))
+             datetime.datetime(end_year, end_month, 1), word)
